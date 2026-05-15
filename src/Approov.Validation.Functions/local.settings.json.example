@@ -1,0 +1,15 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "APPROOV_BASE64_SECRET": "replace-with-key-vault-reference-or-local-test-secret",
+    "APPROOV_TOKEN_BINDING_HEADERS": "",
+    "APPROOV_MESSAGE_SIGNING_MODE": "required",
+    "APPROOV_SIGNATURE_REQUIRE_CREATED": "true",
+    "APPROOV_SIGNATURE_REQUIRE_EXPIRES": "false",
+    "APPROOV_SIGNATURE_MAX_AGE_SECONDS": "300",
+    "APPROOV_SIGNATURE_CLOCK_SKEW_SECONDS": "60",
+    "APPROOV_MAX_BODY_BYTES": "10485760"
+  }
+}
