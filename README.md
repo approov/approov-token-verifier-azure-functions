@@ -41,4 +41,7 @@ The APIM fragment mirrors the incoming request to the Function using `send-reque
 ```bash
 dotnet build ApproovAzureValidation.sln
 dotnet test ApproovAzureValidation.sln
+dotnet test ApproovAzureValidation.sln --settings coverlet.runsettings --collect:"XPlat Code Coverage" --results-directory TestResults
 ```
+
+CI runs the same build and test flow on pushes and pull requests, collecting `XPlat Code Coverage` results as a workflow artifact. See [docs/AZURE_TESTING.md](docs/AZURE_TESTING.md) for the Azure APIM/Function validation plan and effort estimate.

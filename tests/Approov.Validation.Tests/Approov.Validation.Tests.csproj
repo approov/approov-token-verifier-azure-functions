@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Approov.Validation\Approov.Validation.csproj" />
+    <ProjectReference Include="..\..\src\Approov.Validation.Functions\Approov.Validation.Functions.csproj" />
   </ItemGroup>
 
 </Project>

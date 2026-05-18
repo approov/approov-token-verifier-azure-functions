@@ -98,13 +98,13 @@ public sealed class ApproovRequestValidator
         {
             return TokenValidationOutcome.Failure("invalid_approov_token_signature", "Approov token signature is invalid.");
         }
-        catch (FormatException)
-        {
-            return TokenValidationOutcome.Failure("invalid_approov_secret", "Approov validation secret is not valid base64.");
-        }
         catch (SecurityTokenException)
         {
             return TokenValidationOutcome.Failure("invalid_approov_token", "Approov token validation failed.");
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

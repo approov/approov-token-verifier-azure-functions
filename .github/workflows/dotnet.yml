@@ -1,0 +1,68 @@
+name: .NET
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore ApproovAzureValidation.sln
+
+      - name: Build
+        run: dotnet build ApproovAzureValidation.sln --configuration Release --no-restore
+
+      - name: Test with coverage
+        run: >
+          dotnet test ApproovAzureValidation.sln
+          --configuration Release
+          --no-build
+          --settings coverlet.runsettings
+          --logger "trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory TestResults
+
+      - name: Enforce line coverage
+        run: |
+          python3 - <<'PY'
+          import glob
+          import sys
+          import xml.etree.ElementTree as ET
+
+          coverage_files = glob.glob("TestResults/**/coverage.cobertura.xml", recursive=True)
+          if not coverage_files:
+              raise SystemExit("No coverage.cobertura.xml file found")
+
+          root = ET.parse(coverage_files[0]).getroot()
+          line_rate = float(root.attrib["line-rate"])
+          print(f"Line coverage: {line_rate:.2%}")
+          if line_rate < 0.80:
+              raise SystemExit("Line coverage is below the 80% threshold")
+          PY
+
+      - name: Upload test results and coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-and-coverage
+          path: TestResults/**
+          if-no-files-found: error

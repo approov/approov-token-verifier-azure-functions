@@ -25,7 +25,14 @@ public sealed class ApproovValidationOptions
             throw new InvalidOperationException("APPROOV_BASE64_SECRET is not configured.");
         }
 
-        return Convert.FromBase64String(ApproovBase64Secret);
+        try
+        {
+            return Convert.FromBase64String(ApproovBase64Secret);
+        }
+        catch (FormatException ex)
+        {
+            throw new InvalidOperationException("APPROOV_BASE64_SECRET is not valid base64.", ex);
+        }
     }
 }
 
