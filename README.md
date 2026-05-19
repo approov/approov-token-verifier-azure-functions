@@ -23,11 +23,11 @@ The verifier is based on the Approov ASP.NET token-check quickstart behavior and
 
 | Protection | Behavior |
 | --- | --- |
-| Approov token | Reads `Approov-Token`, validates JWT/JWS format, validates HS256 with `APPROOV_BASE64_SECRET`, requires `exp`, and rejects expired or incorrectly signed tokens. |
+| Approov token | Reads `Approov-Token`, validates JWT/JWS format, pins token signing algorithms from configuration, validates HMAC tokens with `APPROOV_BASE64_SECRET` or asymmetric tokens with an Approov public key, requires `exp`, and rejects expired or incorrectly signed tokens. |
 | Device id | Extracts `did` when present and returns it to APIM as `X-Approov-Device-Id` on success. |
 | Token binding | When configured, hashes selected request header values and compares the result with the token `pay` claim. |
 | Message signing | Verifies `Signature` and `Signature-Input` using the installation public key in the token `ipk` claim. |
-| Content digest | Validates `Content-Digest` when present, supporting `sha-256` and `sha-512`. |
+| Content digest | Validates `Content-Digest` when present, supporting `sha-256` and `sha-512`. Set `APPROOV_REQUIRE_SIGNED_CONTENT_DIGEST=true` when the digest header must also be covered by the message signature. |
 | Gateway metadata | Reconstructs the request signed by the mobile app from APIM-supplied `X-Approov-Original-*` headers, not from the Function URL. |
 
 ## Repository Layout
@@ -89,7 +89,7 @@ Register the API domain with Approov if it has not already been added:
 approov api -add api.example.com
 ```
 
-Export the Approov account secret in base64 form. Store this only in a secret manager such as Azure Key Vault.
+For the default symmetric `HS256` token mode, export the Approov account secret in base64 form. Store this only in a secret manager such as Azure Key Vault.
 
 ```bash
 approov secret -get base64 -plain
@@ -97,9 +97,17 @@ approov secret -get base64 -plain
 
 Do not commit this value, put it in APIM named values, or pass it to the backend. The Function is the only component in this architecture that needs the Approov account secret.
 
+For asymmetric Approov keyset tokens, configure the Function with the keyset public key instead of the symmetric secret. For example:
+
+```bash
+approov keyset -kid your-key -getPEM your-key.pem
+```
+
+Use `APPROOV_TOKEN_SIGNING_ALGORITHMS` to pin the exact token algorithm for that key, for example `RS256`, `PS256`, or `ES256`. The Function supports Approov JWS signing algorithms `HS256`, `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, and `ES512`; configure only the algorithms actually used by the protected API domain.
+
 For token binding, decide which stable request header values should be bound into the token. `Authorization` is the usual choice when the mobile app also authenticates the user. Avoid rapidly changing values because the SDK clears cached Approov tokens when the binding data changes.
 
-For message signing, make sure the mobile client signs the Approov token as one of the covered components. This prevents replay of a valid signature with a different token.
+For message signing, make sure the mobile client signs the Approov token as one of the covered components. This prevents replay of a valid signature with a different token. If a request includes `Content-Digest`, enable `APPROOV_REQUIRE_SIGNED_CONTENT_DIGEST=true` only after clients include `content-digest` in `Signature-Input`.
 
 ## Azure Production Deployment
 
@@ -228,8 +236,12 @@ az functionapp config appsettings set \
   --name "$FUNCTION_APP" \
   --settings \
     "APPROOV_BASE64_SECRET=@Microsoft.KeyVault(SecretUri=$SECRET_URI)" \
+    "APPROOV_PUBLIC_KEY_PEM=" \
+    "APPROOV_PUBLIC_KEY_BASE64=" \
+    "APPROOV_TOKEN_SIGNING_ALGORITHMS=HS256" \
     "APPROOV_TOKEN_BINDING_HEADERS=" \
     "APPROOV_MESSAGE_SIGNING_MODE=required" \
+    "APPROOV_REQUIRE_SIGNED_CONTENT_DIGEST=false" \
     "APPROOV_SIGNATURE_REQUIRE_CREATED=true" \
     "APPROOV_SIGNATURE_REQUIRE_EXPIRES=false" \
     "APPROOV_SIGNATURE_MAX_AGE_SECONDS=300" \
@@ -244,6 +256,31 @@ az functionapp config appsettings set \
   --resource-group "$RESOURCE_GROUP" \
   --name "$FUNCTION_APP" \
   --settings "APPROOV_TOKEN_BINDING_HEADERS=Authorization"
+```
+
+For asymmetric keyset tokens, store the public key PEM in Key Vault and configure the pinned signing algorithm. Public keys can verify tokens but cannot mint tokens, so this avoids placing a symmetric token-signing secret in the Function:
+
+```bash
+az keyvault secret set \
+  --vault-name "$KEY_VAULT" \
+  --name "approov-public-key-pem" \
+  --file your-key.pem
+
+PUBLIC_KEY_SECRET_URI=$(
+  az keyvault secret show \
+    --vault-name "$KEY_VAULT" \
+    --name "approov-public-key-pem" \
+    --query id \
+    --output tsv
+)
+
+az functionapp config appsettings set \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$FUNCTION_APP" \
+  --settings \
+    "APPROOV_BASE64_SECRET=" \
+    "APPROOV_PUBLIC_KEY_PEM=@Microsoft.KeyVault(SecretUri=$PUBLIC_KEY_SECRET_URI)" \
+    "APPROOV_TOKEN_SIGNING_ALGORITHMS=RS256"
 ```
 
 Build and deploy the Function:
@@ -388,9 +425,13 @@ The fragment:
 
 | Setting | Required | Default | Production guidance |
 | --- | --- | --- | --- |
-| `APPROOV_BASE64_SECRET` | Yes | None | Use a Key Vault reference. Never store this in source, APIM, or client code. |
+| `APPROOV_BASE64_SECRET` | Yes for HMAC token algorithms | None | Use a Key Vault reference. Never store this in source, APIM, or client code. Leave empty when using asymmetric public-key verification only. |
+| `APPROOV_PUBLIC_KEY_PEM` | No | None | Public key PEM from `approov keyset -kid <kid> -getPEM`. Use instead of `APPROOV_BASE64_SECRET` for asymmetric token verification. |
+| `APPROOV_PUBLIC_KEY_BASE64` | No | None | Base64 DER `SubjectPublicKeyInfo` public key. Alternative to `APPROOV_PUBLIC_KEY_PEM`. |
+| `APPROOV_TOKEN_SIGNING_ALGORITHMS` | No for `HS256`, yes for asymmetric keys | `HS256` when no public key is configured | Comma-delimited allow list. Pin this to the exact Approov keyset algorithm, for example `RS256` or `ES256`. |
 | `APPROOV_TOKEN_BINDING_HEADERS` | No | Empty | Comma-delimited header list, for example `Authorization`. Leave empty to disable token binding. |
 | `APPROOV_MESSAGE_SIGNING_MODE` | No | `required` | Use `required` for production unless explicitly running a migration or pilot. |
+| `APPROOV_REQUIRE_SIGNED_CONTENT_DIGEST` | No | `false` | When `true`, requires `Content-Digest` to be included in `Signature-Input` when the digest header is present. Enable after clients sign `content-digest`. |
 | `APPROOV_SIGNATURE_REQUIRE_CREATED` | No | `true` | Keep enabled. |
 | `APPROOV_SIGNATURE_REQUIRE_EXPIRES` | No | `false` | Enable if the mobile signing implementation always sends `expires`. |
 | `APPROOV_SIGNATURE_MAX_AGE_SECONDS` | No | `300` | Maximum accepted signature age from `created`. |
@@ -419,11 +460,13 @@ After deployment, test these paths:
 | Direct Function call with no Entra token | `401` after App Service Authentication is enabled. |
 | APIM call with no `Approov-Token` | `401` from APIM; backend is not reached. |
 | APIM call with malformed token | `401` from APIM; backend is not reached. |
+| APIM call with token signed by an unconfigured algorithm | `401` from APIM; backend is not reached. |
 | APIM call with expired token | `401` from APIM; backend is not reached. |
 | APIM call with valid token but missing message signature | `401` when signing mode is `required`. |
 | APIM call with valid token and valid message signature | Backend is reached and receives trusted `X-Approov-*` headers. |
 | Spoofed inbound `X-Approov-Original-*` headers | APIM overwrites them before verifier call and strips them before backend. |
-| Request with body and `Content-Digest` | Valid digest passes; tampered body fails. |
+| Request with body and signed `Content-Digest` | Valid digest passes; tampered body fails. |
+| Request with `Content-Digest` omitted from `Signature-Input` | Passes by default if the digest value matches the body; returns `401` when `APPROOV_REQUIRE_SIGNED_CONTENT_DIGEST=true`. |
 | Request larger than `APPROOV_MAX_BODY_BYTES` | Verifier returns `413`; APIM blocks the request. |
 
 For a full Azure validation plan, including failure-mode and latency tests, see `docs/AZURE_TESTING.md`.
@@ -544,6 +587,7 @@ This is the right default for production security. If a pilot needs fail-open be
 ## Security Checklist
 
 - `APPROOV_BASE64_SECRET` is stored only in Key Vault.
+- Asymmetric deployments use `APPROOV_PUBLIC_KEY_PEM` or `APPROOV_PUBLIC_KEY_BASE64` and pin `APPROOV_TOKEN_SIGNING_ALGORITHMS`.
 - Function identity has only `Key Vault Secrets User` on the required vault or secret scope.
 - APIM has a managed identity enabled.
 - Function App Authentication requires Microsoft Entra authentication.
@@ -553,6 +597,7 @@ This is the right default for production security. If a pilot needs fail-open be
 - APIM policy editors are tightly controlled because policy editors can use APIM managed identity.
 - Raw `Approov-Token`, `Signature`, `Signature-Input`, and `Content-Digest` are stripped before backend forwarding.
 - Internal `X-Approov-Original-*` headers are overwritten before verifier call and stripped before backend forwarding.
+- Enable `APPROOV_REQUIRE_SIGNED_CONTENT_DIGEST` for routes where the digest must be bound to the message signature.
 - Backend trusts only APIM, not arbitrary internet clients.
 - Server clocks are synchronized.
 - Production and non-production secrets, app registrations, and APIM named values are separated.

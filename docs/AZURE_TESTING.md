@@ -19,8 +19,11 @@ Use a temporary Azure resource group with:
 
 - Valid Approov token, valid message signature, valid body digest reaches the echo backend.
 - Missing/expired/tampered Approov token returns `401` from APIM and does not reach backend.
+- Token signed by an unconfigured algorithm returns `401`.
+- Symmetric `HS256` and configured asymmetric keyset tokens, such as `RS256` or `ES256`, are accepted only when the matching key and algorithm are configured.
 - Missing `Signature` or `Signature-Input` returns `401`.
-- Tampered path, query, header, or body returns `401`.
+- Tampered path, query, signed header, or signed body digest returns `401`.
+- `Content-Digest` omitted from `Signature-Input` returns `401` when signed digest enforcement is enabled.
 - Stale and future `created` timestamps return `401`.
 - Token binding enabled with matching `Authorization` reaches backend.
 - Missing token binding header returns `400` from the verifier/APIM path.

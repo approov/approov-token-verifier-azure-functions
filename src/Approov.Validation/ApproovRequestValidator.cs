@@ -65,12 +65,29 @@ public sealed class ApproovRequestValidator
         try
         {
             var tokenHandler = new JwtSecurityTokenHandler();
+            var unvalidatedToken = tokenHandler.ReadJwtToken(token);
+            var tokenAlgorithm = unvalidatedToken.Header.Alg;
+            if (!_options.TokenSigningAlgorithms.Contains(tokenAlgorithm, StringComparer.Ordinal))
+            {
+                return TokenValidationOutcome.Failure(
+                    "invalid_approov_token_algorithm",
+                    $"Approov token signing algorithm '{tokenAlgorithm ?? "<missing>"}' is not configured.");
+            }
+
+            var signingKeys = ResolveTokenSigningKeys(tokenAlgorithm).ToArray();
+            if (signingKeys.Length == 0)
+            {
+                throw new InvalidOperationException($"No Approov token signing key is configured for algorithm '{tokenAlgorithm}'.");
+            }
+
             tokenHandler.ValidateToken(token, new TokenValidationParameters
             {
                 ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(_options.GetSecretBytes()),
+                IssuerSigningKeys = signingKeys,
+                ValidAlgorithms = _options.TokenSigningAlgorithms,
                 ValidateIssuer = false,
                 ValidateAudience = false,
+                RequireSignedTokens = true,
                 RequireExpirationTime = true,
                 ClockSkew = TimeSpan.Zero
             }, out var validatedToken);
@@ -98,6 +115,14 @@ public sealed class ApproovRequestValidator
         {
             return TokenValidationOutcome.Failure("invalid_approov_token_signature", "Approov token signature is invalid.");
         }
+        catch (ArgumentException)
+        {
+            return TokenValidationOutcome.Failure("invalid_approov_token", "Approov token validation failed.");
+        }
+        catch (CryptographicException ex)
+        {
+            throw new InvalidOperationException("Approov token signing public key is not configured correctly.", ex);
+        }
         catch (SecurityTokenException)
         {
             return TokenValidationOutcome.Failure("invalid_approov_token", "Approov token validation failed.");
@@ -111,6 +136,60 @@ public sealed class ApproovRequestValidator
             _logger.LogError(ex, "Unexpected Approov token validation failure.");
             return TokenValidationOutcome.Failure("approov_token_validation_error", "Approov token validation failed unexpectedly.");
         }
+    }
+
+    private IEnumerable<SecurityKey> ResolveTokenSigningKeys(string? algorithm)
+    {
+        if (string.IsNullOrWhiteSpace(algorithm))
+        {
+            yield break;
+        }
+
+        if (IsHmacAlgorithm(algorithm))
+        {
+            yield return new SymmetricSecurityKey(_options.GetSecretBytes());
+            yield break;
+        }
+
+        var publicKeyPem = _options.GetPublicKeyPem();
+        if (IsRsaAlgorithm(algorithm))
+        {
+            var rsa = RSA.Create();
+            rsa.ImportFromPem(publicKeyPem);
+            yield return new RsaSecurityKey(rsa);
+            yield break;
+        }
+
+        if (IsEcdsaAlgorithm(algorithm))
+        {
+            var ecdsa = ECDsa.Create();
+            ecdsa.ImportFromPem(publicKeyPem);
+            yield return new ECDsaSecurityKey(ecdsa);
+        }
+    }
+
+    private static bool IsHmacAlgorithm(string algorithm)
+    {
+        return string.Equals(algorithm, SecurityAlgorithms.HmacSha256, StringComparison.Ordinal) ||
+            string.Equals(algorithm, SecurityAlgorithms.HmacSha384, StringComparison.Ordinal) ||
+            string.Equals(algorithm, SecurityAlgorithms.HmacSha512, StringComparison.Ordinal);
+    }
+
+    private static bool IsRsaAlgorithm(string algorithm)
+    {
+        return string.Equals(algorithm, SecurityAlgorithms.RsaSha256, StringComparison.Ordinal) ||
+            string.Equals(algorithm, SecurityAlgorithms.RsaSha384, StringComparison.Ordinal) ||
+            string.Equals(algorithm, SecurityAlgorithms.RsaSha512, StringComparison.Ordinal) ||
+            string.Equals(algorithm, SecurityAlgorithms.RsaSsaPssSha256, StringComparison.Ordinal) ||
+            string.Equals(algorithm, SecurityAlgorithms.RsaSsaPssSha384, StringComparison.Ordinal) ||
+            string.Equals(algorithm, SecurityAlgorithms.RsaSsaPssSha512, StringComparison.Ordinal);
+    }
+
+    private static bool IsEcdsaAlgorithm(string algorithm)
+    {
+        return string.Equals(algorithm, SecurityAlgorithms.EcdsaSha256, StringComparison.Ordinal) ||
+            string.Equals(algorithm, SecurityAlgorithms.EcdsaSha384, StringComparison.Ordinal) ||
+            string.Equals(algorithm, SecurityAlgorithms.EcdsaSha512, StringComparison.Ordinal);
     }
 
     private BindingValidationOutcome ValidateTokenBinding(ApproovSignedRequest request, string? payClaim)

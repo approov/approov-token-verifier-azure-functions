@@ -30,6 +30,7 @@ public sealed class ApproovSignedRequest
             StringComparer.OrdinalIgnoreCase);
         Headers = new ReadOnlyDictionary<string, IReadOnlyList<string>>(_headers);
         QueryParameters = ParseQuery(Query);
+        QueryParameterItems = ParseQueryItems(Query);
     }
 
     public string Method { get; }
@@ -41,6 +42,7 @@ public sealed class ApproovSignedRequest
     public string? OriginalUrl { get; }
     public IReadOnlyDictionary<string, IReadOnlyList<string>> Headers { get; }
     public IReadOnlyDictionary<string, IReadOnlyList<string>> QueryParameters { get; }
+    public IReadOnlyList<ApproovQueryParameter> QueryParameterItems { get; }
 
     public string RequestTarget => Path + Query;
 
@@ -98,8 +100,38 @@ public sealed class ApproovSignedRequest
             result.ToDictionary(entry => entry.Key, entry => (IReadOnlyList<string>)entry.Value, StringComparer.OrdinalIgnoreCase));
     }
 
+    private static IReadOnlyList<ApproovQueryParameter> ParseQueryItems(string query)
+    {
+        var result = new List<ApproovQueryParameter>();
+        var normalized = query.TrimStart('?');
+        if (normalized.Length == 0)
+        {
+            return result;
+        }
+
+        foreach (var pair in normalized.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separatorIndex = pair.IndexOf('=', StringComparison.Ordinal);
+            var rawName = separatorIndex >= 0 ? pair[..separatorIndex] : pair;
+            var rawValue = separatorIndex >= 0 ? pair[(separatorIndex + 1)..] : string.Empty;
+            var name = EncodeQueryComponentForSignature(DecodeQueryComponent(rawName));
+            var value = EncodeQueryComponentForSignature(DecodeQueryComponent(rawValue));
+
+            result.Add(new ApproovQueryParameter(name, value));
+        }
+
+        return result;
+    }
+
     private static string DecodeQueryComponent(string value)
     {
         return Uri.UnescapeDataString(value.Replace("+", " ", StringComparison.Ordinal));
     }
+
+    private static string EncodeQueryComponentForSignature(string value)
+    {
+        return Uri.EscapeDataString(value);
+    }
 }
+
+public sealed record ApproovQueryParameter(string EncodedName, string EncodedValue);

@@ -2,13 +2,27 @@ namespace Approov.Validation;
 
 public static class ApproovValidationOptionsFactory
 {
+    private static readonly string[] DefaultHmacAlgorithms =
+    {
+        "HS256"
+    };
+
     public static ApproovValidationOptions FromEnvironment()
     {
+        var publicKeyPem = Environment.GetEnvironmentVariable("APPROOV_PUBLIC_KEY_PEM");
+        var publicKeyBase64 = Environment.GetEnvironmentVariable("APPROOV_PUBLIC_KEY_BASE64");
+
         return new ApproovValidationOptions
         {
             ApproovBase64Secret = Environment.GetEnvironmentVariable("APPROOV_BASE64_SECRET"),
+            ApproovPublicKeyPem = publicKeyPem,
+            ApproovPublicKeyBase64 = publicKeyBase64,
+            TokenSigningAlgorithms = ParseTokenSigningAlgorithms(
+                Environment.GetEnvironmentVariable("APPROOV_TOKEN_SIGNING_ALGORITHMS"),
+                string.IsNullOrWhiteSpace(publicKeyPem) && string.IsNullOrWhiteSpace(publicKeyBase64)),
             TokenBindingHeaders = ParseHeaderList(Environment.GetEnvironmentVariable("APPROOV_TOKEN_BINDING_HEADERS")),
             MessageSigningMode = ParseMessageSigningMode(Environment.GetEnvironmentVariable("APPROOV_MESSAGE_SIGNING_MODE")),
+            RequireSignedContentDigest = ParseBoolean(Environment.GetEnvironmentVariable("APPROOV_REQUIRE_SIGNED_CONTENT_DIGEST"), false),
             SignatureRequireCreated = ParseBoolean(Environment.GetEnvironmentVariable("APPROOV_SIGNATURE_REQUIRE_CREATED"), true),
             SignatureRequireExpires = ParseBoolean(Environment.GetEnvironmentVariable("APPROOV_SIGNATURE_REQUIRE_EXPIRES"), false),
             SignatureMaximumAge = ParseOptionalSeconds(Environment.GetEnvironmentVariable("APPROOV_SIGNATURE_MAX_AGE_SECONDS"), TimeSpan.FromSeconds(300)),
@@ -24,6 +38,20 @@ public static class ApproovValidationOptionsFactory
             : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Where(value => value.Length > 0)
                 .ToArray();
+    }
+
+    private static IReadOnlyList<string> ParseTokenSigningAlgorithms(string? raw, bool defaultToHmac)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return defaultToHmac ? DefaultHmacAlgorithms : Array.Empty<string>();
+        }
+
+        return raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(value => value.Length > 0)
+            .Select(value => value.ToUpperInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static ApproovMessageSigningMode ParseMessageSigningMode(string? raw)

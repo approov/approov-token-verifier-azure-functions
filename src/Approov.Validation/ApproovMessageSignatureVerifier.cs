@@ -45,8 +45,10 @@ public sealed class ApproovMessageSignatureVerifier
         var signatureHeader = StructuredFieldFormatter.CombineHeaderValues(request.GetHeaderValues("Signature"));
         var signatureInputHeader = StructuredFieldFormatter.CombineHeaderValues(request.GetHeaderValues("Signature-Input"));
 
-        _logger.LogDebug("Approov message signing: raw Signature header {Header}", signatureHeader);
-        _logger.LogDebug("Approov message signing: raw Signature-Input header {Header}", signatureInputHeader);
+        _logger.LogDebug(
+            "Approov message signing: received Signature length {SignatureLength} and Signature-Input length {SignatureInputLength}",
+            signatureHeader.Length,
+            signatureInputHeader.Length);
 
         if (string.IsNullOrWhiteSpace(signatureHeader) || string.IsNullOrWhiteSpace(signatureInputHeader))
         {
@@ -126,7 +128,14 @@ public sealed class ApproovMessageSignatureVerifier
         }
 
         var canonicalPayloadBytes = Encoding.UTF8.GetBytes(canonicalBase.Payload!);
-        _logger.LogTrace("Approov message signing: canonical payload built:\n{Payload}", canonicalBase.Payload);
+        _logger.LogTrace("Approov message signing: canonical payload length {Length}", canonicalPayloadBytes.Length);
+
+        if (_validationOptions.RequireSignedContentDigest &&
+            !string.IsNullOrWhiteSpace(request.GetHeaderValue("Content-Digest")) &&
+            !IsComponentCovered(componentIdentifiers, "content-digest"))
+        {
+            return MessageSignatureResult.Failure("Content-Digest header must be covered by the message signature");
+        }
 
         var contentDigestValidation = VerifyContentDigest(request);
         if (!contentDigestValidation.Success)
@@ -323,6 +332,13 @@ public sealed class ApproovMessageSignatureVerifier
         }
     }
 
+    private static bool IsComponentCovered(IReadOnlyList<ParsedItem> components, string identifier)
+    {
+        return components.Any(component =>
+            component.Value is string componentIdentifier &&
+            string.Equals(componentIdentifier, identifier, StringComparison.OrdinalIgnoreCase));
+    }
+
     // Reconstructs the canonical message according to the Structured Field component list supplied by the client.
     private (bool Success, string? Payload, string? Error) BuildCanonicalMessage(ApproovSignedRequest request, IReadOnlyList<ParsedItem> components, IReadOnlyDictionary<string, object>? parameters)
     {
@@ -345,7 +361,7 @@ public sealed class ApproovMessageSignatureVerifier
                 return (false, null, ex.Message);
             }
 
-            _logger.LogTrace("Approov message signing: component {Identifier} -> {Value}", identifier, value);
+            _logger.LogTrace("Approov message signing: resolved component {Identifier} with value length {Length}", identifier, value.Length);
             // Serialise the Structured Field token back into its textual label (e.g. "@method").
             var label = StructuredFieldFormatter.SerializeItem(component);
             lines.Add($"{label}: {value}");
@@ -461,7 +477,7 @@ public sealed class ApproovMessageSignatureVerifier
             case "@path":
                 return request.Path;
             case "@query":
-                return request.Query.TrimStart('?');
+                return string.IsNullOrEmpty(request.Query) ? "?" : request.Query;
             case "@request-target":
                 return request.RequestTarget;
             case "@query-param":
@@ -478,12 +494,21 @@ public sealed class ApproovMessageSignatureVerifier
             throw new MessageSignatureException("@query-param requires a 'name' parameter");
         }
 
-        if (!request.QueryParameters.TryGetValue(name, out var queryValues) || queryValues.Count == 0)
+        var matchingValues = request.QueryParameterItems
+            .Where(parameter => string.Equals(parameter.EncodedName, name, StringComparison.Ordinal))
+            .ToArray();
+
+        if (matchingValues.Length == 0)
         {
             throw new MessageSignatureException($"Missing query parameter '{name}' for @query-param component");
         }
 
-        return string.Join(',', queryValues.ToArray());
+        if (matchingValues.Length > 1)
+        {
+            throw new MessageSignatureException($"Query parameter '{name}' occurs multiple times and cannot be used with @query-param");
+        }
+
+        return matchingValues[0].EncodedValue;
     }
 
     private string ResolveHeaderComponent(ApproovSignedRequest request, string headerName, IReadOnlyDictionary<string, object>? parameters)

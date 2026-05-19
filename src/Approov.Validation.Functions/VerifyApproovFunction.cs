@@ -27,7 +27,7 @@ public sealed class VerifyApproovFunction
 
     [Function("VerifyApproov")]
     public async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", "put", "patch", "delete", Route = "approov/verify")]
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "head", "post", "put", "patch", "delete", Route = "approov/verify")]
         HttpRequestData req)
     {
         try

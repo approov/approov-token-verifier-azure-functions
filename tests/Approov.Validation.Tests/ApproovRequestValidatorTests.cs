@@ -12,6 +12,7 @@ using StructuredFieldValues;
 public sealed class ApproovRequestValidatorTests
 {
     private const string TestSecretBase64 = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=";
+    private const string TestLongSecretBase64 = "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIz";
     private const string TestPrivateKey = "MHcCAQEEIHWZ2Ueq6odQNG+aaYmEbp7C6nujYNGr7nYKK2jqQ2asoAoGCCqGSM49AwEHoUQDQgAEJSm4DMcivAwvhM+KNce2C/X26cj3oGyUwWVUPuNuZHtd2qyVsM+0g7qX73Qh0Of6fn10AApLnl8vRQsvx94fZQ==";
     private static readonly string ValidPublicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEJSm4DMcivAwvhM+KNce2C/X26cj3oGyUwWVUPuNuZHtd2qyVsM+0g7qX73Qh0Of6fn10AApLnl8vRQsvx94fZQ==";
 
@@ -58,6 +59,50 @@ public sealed class ApproovRequestValidatorTests
         Assert.False(result.IsValid);
         Assert.Equal(401, result.StatusCode);
         Assert.Equal("invalid_approov_token_signature", result.ReasonCode);
+    }
+
+    [Fact]
+    public void Validate_WithUnconfiguredHmacAlgorithm_ReturnsUnauthorized()
+    {
+        var token = CreateToken(
+            secretBase64: TestLongSecretBase64,
+            signingAlgorithm: SecurityAlgorithms.HmacSha384,
+            ipk: ValidPublicKey);
+        var request = BuildSignedRequest(token);
+
+        var result = CreateValidator(secretBase64: TestLongSecretBase64).Validate(request);
+
+        Assert.False(result.IsValid);
+        Assert.Equal(401, result.StatusCode);
+        Assert.Equal("invalid_approov_token_algorithm", result.ReasonCode);
+    }
+
+    [Fact]
+    public void Validate_WithConfiguredRs256PublicKey_ReturnsValid()
+    {
+        var token = CreateRsaToken(SecurityAlgorithms.RsaSha256, out var publicKeyBase64);
+        var request = BuildSignedRequest(token);
+
+        var result = CreateValidator(
+            tokenSigningAlgorithms: new[] { SecurityAlgorithms.RsaSha256 },
+            publicKeyBase64: publicKeyBase64).Validate(request);
+
+        Assert.True(result.IsValid);
+        Assert.True(result.MessageSignatureVerified);
+    }
+
+    [Fact]
+    public void Validate_WithConfiguredEs256PublicKey_ReturnsValid()
+    {
+        var token = CreateEcdsaToken(SecurityAlgorithms.EcdsaSha256, out var publicKeyBase64);
+        var request = BuildSignedRequest(token);
+
+        var result = CreateValidator(
+            tokenSigningAlgorithms: new[] { SecurityAlgorithms.EcdsaSha256 },
+            publicKeyBase64: publicKeyBase64).Validate(request);
+
+        Assert.True(result.IsValid);
+        Assert.True(result.MessageSignatureVerified);
     }
 
     [Fact]
@@ -206,6 +251,37 @@ public sealed class ApproovRequestValidatorTests
     }
 
     [Fact]
+    public void Validate_WithEncodedQueryParam_ReturnsValid()
+    {
+        var signatureInput = CreateSignatureInput(
+            "\"@query\" \"@query-param\";name=\"bar\" \"@query-param\";name=\"fa%C3%A7ade%22%3A%20\" \"@query-param\";name=\"qux\" \"approov-token\"");
+        var request = BuildSignedRequestWithQuery(
+            CreateToken(ipk: ValidPublicKey),
+            "?bar=with+plus+whitespace&fa%C3%A7ade%22%3A%20=something&qux=",
+            signatureInput);
+
+        var result = CreateValidator().Validate(request);
+
+        Assert.True(result.IsValid);
+        Assert.True(result.MessageSignatureVerified);
+    }
+
+    [Fact]
+    public void Validate_WithDuplicateQueryParamComponent_ReturnsUnauthorized()
+    {
+        var request = BuildRequestWithQueryAndDummySignature(
+            CreateToken(ipk: ValidPublicKey),
+            "?param=one&param=two",
+            CreateSignatureInput("\"@query-param\";name=\"param\" \"approov-token\""));
+
+        var result = CreateValidator().Validate(request);
+
+        Assert.False(result.IsValid);
+        Assert.Equal(401, result.StatusCode);
+        Assert.Equal("invalid_message_signature", result.ReasonCode);
+    }
+
+    [Fact]
     public void Validate_WithCaseInsensitiveMultiValueHeader_ReturnsValid()
     {
         var signatureInput = CreateSignatureInput("\"x-custom-header\"");
@@ -253,6 +329,37 @@ public sealed class ApproovRequestValidatorTests
 
         Assert.True(result.IsValid);
         Assert.True(result.MessageSignatureVerified);
+    }
+
+    [Fact]
+    public void Validate_WithUnsignedContentDigestAndDefaultOptions_ReturnsValid()
+    {
+        var body = Encoding.UTF8.GetBytes("{\"ok\":true}");
+        var request = BuildSignedRequest(
+            CreateToken(ipk: ValidPublicKey),
+            body,
+            includeContentDigest: true);
+
+        var result = CreateValidator().Validate(request);
+
+        Assert.True(result.IsValid);
+        Assert.True(result.MessageSignatureVerified);
+    }
+
+    [Fact]
+    public void Validate_WithUnsignedContentDigestAndStrictDigestMode_ReturnsUnauthorized()
+    {
+        var body = Encoding.UTF8.GetBytes("{\"ok\":true}");
+        var request = BuildSignedRequest(
+            CreateToken(ipk: ValidPublicKey),
+            body,
+            includeContentDigest: true);
+
+        var result = CreateValidator(requireSignedContentDigest: true).Validate(request);
+
+        Assert.False(result.IsValid);
+        Assert.Equal(401, result.StatusCode);
+        Assert.Equal("invalid_message_signature", result.ReasonCode);
     }
 
     [Fact]
@@ -331,7 +438,13 @@ public sealed class ApproovRequestValidatorTests
     public void Validate_WithContentDigestMismatch_ReturnsUnauthorized()
     {
         var token = CreateToken(ipk: ValidPublicKey);
-        var request = BuildSignedRequest(token, body: Encoding.UTF8.GetBytes("{\"ok\":true}"), includeContentDigest: true);
+        var request = BuildSignedRequest(
+            token,
+            body: Encoding.UTF8.GetBytes("{\"ok\":true}"),
+            includeContentDigest: true,
+            signatureInput: CreateSignatureInput("\"@method\" \"content-digest\" \"approov-token\""),
+            created: null,
+            expires: null);
         var tampered = new ApproovSignedRequest(request.Method, request.Scheme, request.Host, request.Path, request.Query, request.Headers, Encoding.UTF8.GetBytes("{\"ok\":false}"), request.OriginalUrl);
 
         var result = CreateValidator().Validate(tampered);
@@ -371,13 +484,19 @@ public sealed class ApproovRequestValidatorTests
         long maxBodyBytes = 10 * 1024 * 1024,
         ApproovMessageSigningMode messageSigningMode = ApproovMessageSigningMode.Required,
         bool requireExpires = false,
-        string? secretBase64 = null)
+        string? secretBase64 = null,
+        IReadOnlyList<string>? tokenSigningAlgorithms = null,
+        string? publicKeyBase64 = null,
+        bool requireSignedContentDigest = false)
     {
         var options = new ApproovValidationOptions
         {
             ApproovBase64Secret = secretBase64 ?? TestSecretBase64,
+            ApproovPublicKeyBase64 = publicKeyBase64,
+            TokenSigningAlgorithms = tokenSigningAlgorithms ?? new[] { SecurityAlgorithms.HmacSha256 },
             TokenBindingHeaders = bindingHeaders ?? Array.Empty<string>(),
             MessageSigningMode = messageSigningMode,
+            RequireSignedContentDigest = requireSignedContentDigest,
             SignatureMaximumAge = TimeSpan.FromMinutes(10),
             SignatureAllowedClockSkew = TimeSpan.FromMinutes(5),
             SignatureRequireExpires = requireExpires,
@@ -453,6 +572,30 @@ public sealed class ApproovRequestValidatorTests
         return new ApproovSignedRequest("GET", "https", "api.example.com", "/token", "?param=value", headers, body);
     }
 
+    private static ApproovSignedRequest BuildSignedRequestWithQuery(
+        string? token,
+        string query,
+        string signatureInput)
+    {
+        var headers = BaseHeaders(token, signatureInputOverride: signatureInput);
+        var body = Array.Empty<byte>();
+        var unsigned = new ApproovSignedRequest("GET", "https", "api.example.com", "/token", query, headers, body);
+        headers["Signature"] = new[] { $"install=:{SignCanonicalMessage(BuildCanonicalMessage(unsigned))}:" };
+
+        return new ApproovSignedRequest("GET", "https", "api.example.com", "/token", query, headers, body);
+    }
+
+    private static ApproovSignedRequest BuildRequestWithQueryAndDummySignature(
+        string? token,
+        string query,
+        string signatureInput)
+    {
+        var headers = BaseHeaders(token, signatureInputOverride: signatureInput);
+        headers["Signature"] = new[] { "install=:AAAA:" };
+
+        return new ApproovSignedRequest("GET", "https", "api.example.com", "/token", query, headers, Array.Empty<byte>());
+    }
+
     private static Dictionary<string, IReadOnlyList<string>> BaseHeaders(string? token, long? createdOverride = null, long? expiresOverride = null, string? signatureInputOverride = null)
     {
         var created = createdOverride ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 30;
@@ -479,9 +622,45 @@ public sealed class ApproovRequestValidatorTests
         DateTime? expires = null,
         string? secretBase64 = null,
         string? pay = null,
-        string? ipk = null)
+        string? ipk = null,
+        string signingAlgorithm = SecurityAlgorithms.HmacSha256)
     {
         var secret = Convert.FromBase64String(secretBase64 ?? TestSecretBase64);
+        return CreateToken(
+            new SigningCredentials(new SymmetricSecurityKey(secret), signingAlgorithm),
+            expires,
+            pay,
+            ipk);
+    }
+
+    private static string CreateRsaToken(string signingAlgorithm, out string publicKeyBase64)
+    {
+        using var rsa = RSA.Create(2048);
+        publicKeyBase64 = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+        return CreateToken(
+            new SigningCredentials(new RsaSecurityKey(rsa), signingAlgorithm),
+            expires: null,
+            pay: null,
+            ipk: ValidPublicKey);
+    }
+
+    private static string CreateEcdsaToken(string signingAlgorithm, out string publicKeyBase64)
+    {
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        publicKeyBase64 = Convert.ToBase64String(ecdsa.ExportSubjectPublicKeyInfo());
+        return CreateToken(
+            new SigningCredentials(new ECDsaSecurityKey(ecdsa), signingAlgorithm),
+            expires: null,
+            pay: null,
+            ipk: ValidPublicKey);
+    }
+
+    private static string CreateToken(
+        SigningCredentials signingCredentials,
+        DateTime? expires,
+        string? pay,
+        string? ipk)
+    {
         var claims = new List<Claim>
         {
             new("did", "ExampleDevice")
@@ -503,7 +682,7 @@ public sealed class ApproovRequestValidatorTests
             NotBefore = DateTime.UtcNow.AddHours(-1),
             IssuedAt = DateTime.UtcNow.AddHours(-1),
             Expires = expires ?? DateTime.UtcNow.AddMinutes(10),
-            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(secret), SecurityAlgorithms.HmacSha256)
+            SigningCredentials = signingCredentials
         };
 
         var handler = new JwtSecurityTokenHandler();
@@ -566,7 +745,7 @@ public sealed class ApproovRequestValidatorTests
             "@authority" => request.Host,
             "@scheme" => request.Scheme,
             "@path" => request.Path,
-            "@query" => request.Query.TrimStart('?'),
+            "@query" => string.IsNullOrEmpty(request.Query) ? "?" : request.Query,
             "@request-target" => request.RequestTarget,
             "@query-param" => ResolveQueryParamForTest(request, parameters),
             _ => ResolveHeaderComponentForTest(request, identifier, parameters)
@@ -578,8 +757,11 @@ public sealed class ApproovRequestValidatorTests
         Assert.NotNull(parameters);
         Assert.True(parameters!.TryGetValue("name", out var value));
         var name = Assert.IsType<string>(value);
-        Assert.True(request.QueryParameters.TryGetValue(name, out var values));
-        return string.Join(',', values);
+        var values = request.QueryParameterItems
+            .Where(parameter => string.Equals(parameter.EncodedName, name, StringComparison.Ordinal))
+            .ToArray();
+        Assert.Single(values);
+        return values[0].EncodedValue;
     }
 
     private static string ResolveHeaderComponentForTest(ApproovSignedRequest request, string identifier, IReadOnlyDictionary<string, object>? parameters)
