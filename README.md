@@ -37,9 +37,21 @@ The verifier is based on the Approov ASP.NET token-check quickstart behavior and
 | `src/Approov.Validation` | Reusable C# validation library. |
 | `src/Approov.Validation.Functions` | .NET 8 isolated Azure Function exposing `/api/approov/verify`. |
 | `apim/approov-validation-fragment.xml` | APIM inbound policy fragment for protected APIs. |
+| `samples/Approov.ShapesApi.Functions` | Optional Shapes-compatible demo backend for Approov quickstart testing. Do not deploy this for customer production. |
 | `tests/Approov.Validation.Tests` | Unit and Function-adapter tests. |
 | `.github/workflows/dotnet.yml` | GitHub Actions build, test, and coverage workflow. |
 | `docs/AZURE_TESTING.md` | Azure integration test plan and effort estimate. |
+
+## Production Vs Demo Assets
+
+Customer production deployments need only:
+
+- `src/Approov.Validation`
+- `src/Approov.Validation.Functions`
+- `apim/approov-validation-fragment.xml`
+- The customer's own APIM APIs and backend services
+
+The `samples/` directory is not part of the verifier product. It exists only to give Approov a repeatable end-to-end demo target when a real customer backend is not available. In customer environments, APIM should forward validated requests to the customer's existing backend API instead of the sample Shapes Function.
 
 ## Production Prerequisites
 
@@ -415,6 +427,58 @@ After deployment, test these paths:
 | Request larger than `APPROOV_MAX_BODY_BYTES` | Verifier returns `413`; APIM blocks the request. |
 
 For a full Azure validation plan, including failure-mode and latency tests, see `docs/AZURE_TESTING.md`.
+
+## Optional Shapes API Demo Harness
+
+The `samples/Approov.ShapesApi.Functions` project is a small backend Function that mirrors the public Approov Shapes demo response for the API key used by existing Approov quickstarts. It is intended for demos, sales validation, and integration testing only. It should not be deployed into customer production environments.
+
+```http
+GET /api/v1/shapes
+Api-Key: yXClypapWNHIifHUWmBIyPFAm
+```
+
+Successful response:
+
+```json
+{"shape":"Square","status":"Square (api key protected)"}
+```
+
+Missing API key response:
+
+```json
+{"status":"missing the api key in the request"}
+```
+
+Invalid API key response:
+
+```json
+{"status":"invalid api key"}
+```
+
+Build it explicitly when you need the demo backend:
+
+```bash
+dotnet build samples/Approov.ShapesApi.Functions/Approov.ShapesApi.Functions.csproj --configuration Release
+```
+
+For a customer-like Azure test path, expose that sample backend through APIM twice:
+
+```text
+https://<apim-gateway-host>/v1/shapes
+https://<apim-gateway-host>/v3/shapes
+```
+
+Use `/v1/shapes` as the baseline API-key-only route. APIM forwards directly to the Shapes backend, and the backend enforces only the `Api-Key` behavior.
+
+Use `/v3/shapes` as the Approov-protected route. The protected request flow is:
+
+```text
+iOS quickstart app -> APIM /v3/shapes -> Approov verifier Function -> APIM -> Shapes backend Function
+```
+
+Configure the iOS quickstart base URL to the APIM gateway host and keep the existing Shapes API key. For `/v3/shapes`, the mobile app must obtain Approov tokens for the APIM gateway domain because message signing covers the URL seen by the app.
+
+For a real customer deployment, skip this sample entirely. Configure the same APIM validation policy in front of the customer's actual API route and set that APIM API's backend to the customer's backend service.
 
 ## Operations
 
