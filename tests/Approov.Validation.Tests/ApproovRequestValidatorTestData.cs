@@ -17,7 +17,8 @@ internal static class ApproovRequestValidatorTestData
     public static ApproovSignedRequest BuildSignedRequest(
         string? token,
         byte[]? body = null,
-        bool includeContentDigest = false)
+        bool includeContentDigest = false,
+        bool includeAccountSignature = false)
     {
         body ??= Array.Empty<byte>();
         var headers = BaseHeaders(token);
@@ -29,6 +30,18 @@ internal static class ApproovRequestValidatorTestData
         var unsigned = new ApproovSignedRequest("GET", "https", "api.example.com", "/token", "?param=value", headers, body);
         headers["Signature"] = new[] { $"install=:{SignCanonicalMessage(BuildCanonicalMessage(unsigned))}:" };
 
+        if (includeAccountSignature)
+        {
+            var accountInput = headers["Signature-Input"][0]
+                .Replace("install=", "account=", StringComparison.Ordinal)
+                .Replace("ecdsa-p256-sha256", "hmac-sha256", StringComparison.Ordinal);
+            headers["Signature-Input"] = new[] { headers["Signature-Input"][0] + ", " + accountInput };
+            var accountRequest = new ApproovSignedRequest("GET", "https", "api.example.com", "/token", "?param=value", headers, body);
+            var signature = HMACSHA256.HashData(Encoding.UTF8.GetBytes("test-account-signing-key"),
+                Encoding.UTF8.GetBytes(BuildCanonicalMessage(accountRequest, "account")));
+            headers["Signature"] = new[] { headers["Signature"][0] + $", account=:{Convert.ToBase64String(signature)}:" };
+        }
+
         return new ApproovSignedRequest("GET", "https", "api.example.com", "/token", "?param=value", headers, body);
     }
 
@@ -36,7 +49,8 @@ internal static class ApproovRequestValidatorTestData
         DateTime? expires = null,
         string? secretBase64 = null,
         string? pay = null,
-        string? ipk = null)
+        string? ipk = null,
+        string? mskid = null)
     {
         var secret = Convert.FromBase64String(secretBase64 ?? TestSecretBase64);
         var claims = new List<Claim> { new("did", "ExampleDevice") };
@@ -50,6 +64,8 @@ internal static class ApproovRequestValidatorTestData
         {
             claims.Add(new Claim("ipk", ipk));
         }
+
+        if (mskid is not null) claims.Add(new Claim("mskid", mskid));
 
         var descriptor = new SecurityTokenDescriptor
         {
@@ -86,10 +102,10 @@ internal static class ApproovRequestValidatorTestData
         return headers;
     }
 
-    private static string BuildCanonicalMessage(ApproovSignedRequest request)
+    private static string BuildCanonicalMessage(ApproovSignedRequest request, string signatureName = "install")
     {
         var parseError = SfvParser.ParseDictionary(request.GetHeaderValue("Signature-Input"), out var dictionary);
-        if (parseError.HasValue || dictionary is null || !dictionary.TryGetValue("install", out var signatureInputItem))
+        if (parseError.HasValue || dictionary is null || !dictionary.TryGetValue(signatureName, out var signatureInputItem))
         {
             throw new InvalidOperationException(parseError?.Message ?? "Invalid Signature-Input test fixture.");
         }

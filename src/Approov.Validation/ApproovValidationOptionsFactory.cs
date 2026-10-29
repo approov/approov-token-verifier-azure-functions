@@ -11,10 +11,12 @@ public static class ApproovValidationOptionsFactory
     {
         var publicKeyPem = Environment.GetEnvironmentVariable("APPROOV_PUBLIC_KEY_PEM");
         var publicKeyBase64 = Environment.GetEnvironmentVariable("APPROOV_PUBLIC_KEY_BASE64");
+        var statusHeader = Environment.GetEnvironmentVariable("APPROOV_STATUS_HEADER_NAME");
 
         return new ApproovValidationOptions
         {
             ApproovBase64Secret = Environment.GetEnvironmentVariable("APPROOV_BASE64_SECRET"),
+            StatusHeaderName = string.IsNullOrWhiteSpace(statusHeader) ? "Approov-Status" : statusHeader.Trim(),
             ApproovPublicKeyPem = publicKeyPem,
             ApproovPublicKeyBase64 = publicKeyBase64,
             TokenSigningAlgorithms = ParseTokenSigningAlgorithms(

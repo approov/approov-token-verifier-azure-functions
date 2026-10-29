@@ -437,7 +437,18 @@ The fragment:
 | `APPROOV_SIGNATURE_MAX_AGE_SECONDS` | No | `300` | Maximum accepted signature age from `created`. |
 | `APPROOV_SIGNATURE_CLOCK_SKEW_SECONDS` | No | `60` | Allowed client/server clock drift. Keep server clocks synchronized. |
 | `APPROOV_MAX_BODY_BYTES` | No | `10485760` | Maximum mirrored body size. Align this with APIM/backend request-size limits. |
+| `APPROOV_STATUS_HEADER_NAME` | No | `Approov-Status` | Client token-fetch status header. Match the service layer configuration. |
 | `WEBSITE_AUTH_AAD_REQUIRE_CLIENT_SERVICE_PRINCIPAL` | Recommended | Platform default | Set to `true` when using Entra auth with APIM managed identity. |
+
+The Function reports the client token-fetch status in the JSON `clientStatus` field and in rejection logs.
+Known lowercase SDK status names pass through. A missing header produces `null` in JSON and `missing` in logs.
+Unknown, repeated, empty, and oversized values produce `invalid`. Raw status-header values never enter these fields or logs.
+This field is a client diagnostic. It never changes token verification or enforcement.
+A request with `Approov-Status: success` and no valid token still returns `401`.
+
+The verifier accepts matching `install` and `account` members in both signature dictionaries.
+It verifies the `install` member with the token's installation public key. It does not verify the account signature.
+`messageSignatureVerified` refers to installation signature verification. A missing or invalid installation signature still fails when signing is required.
 
 ## Validation And Smoke Tests
 

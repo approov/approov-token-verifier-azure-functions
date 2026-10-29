@@ -8,7 +8,8 @@ public sealed record ApproovValidationResult(
     string? DeviceId = null,
     DateTime? TokenExpiryUtc = null,
     bool TokenBindingVerified = false,
-    bool MessageSignatureVerified = false)
+    bool MessageSignatureVerified = false,
+    string? ClientStatus = null)
 {
     public static ApproovValidationResult Valid(
         string? deviceId,

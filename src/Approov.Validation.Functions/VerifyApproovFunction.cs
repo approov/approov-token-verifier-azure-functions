@@ -51,7 +51,8 @@ public sealed class VerifyApproovFunction
             var result = _validator.Validate(buildResult.Request!);
             if (!result.IsValid)
             {
-                _logger.LogInformation("Approov validation rejected request: {ReasonCode}", result.ReasonCode);
+                _logger.LogInformation("Approov validation rejected request: {ReasonCode}; client token-fetch status: {ClientStatus}",
+                    result.ReasonCode, result.ClientStatus ?? "missing");
             }
 
             return await WriteResultAsync(req, result);
@@ -117,6 +118,7 @@ public sealed class VerifyApproovFunction
             valid = result.IsValid,
             reasonCode = result.ReasonCode,
             message = result.Message,
+            clientStatus = result.ClientStatus,
             deviceId = result.DeviceId,
             tokenExpiryUtc = result.TokenExpiryUtc,
             tokenBindingVerified = result.TokenBindingVerified,
