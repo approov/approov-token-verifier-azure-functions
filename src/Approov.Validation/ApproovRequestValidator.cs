@@ -24,6 +24,11 @@ public sealed class ApproovRequestValidator
 
     public ApproovValidationResult Validate(ApproovSignedRequest request)
     {
+        return ValidateRequest(request) with { ClientStatus = ApproovClientStatus.Read(request, _options.StatusHeaderName) };
+    }
+
+    private ApproovValidationResult ValidateRequest(ApproovSignedRequest request)
+    {
         if (request.Body.LongLength > _options.MaxBodyBytes)
         {
             return ApproovValidationResult.PayloadTooLarge($"Request body exceeds {_options.MaxBodyBytes} bytes.");

@@ -9,6 +9,8 @@ public sealed class ApproovValidationOptions
 
     public string? ApproovBase64Secret { get; set; }
 
+    public string StatusHeaderName { get; set; } = "Approov-Status";
+
     public string? ApproovPublicKeyPem { get; set; }
 
     public string? ApproovPublicKeyBase64 { get; set; }

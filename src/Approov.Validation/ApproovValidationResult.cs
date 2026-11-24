@@ -10,6 +10,9 @@ public sealed record ApproovValidationResult(
     bool TokenBindingVerified = false,
     bool MessageSignatureVerified = false)
 {
+    // Not a positional parameter, so the public constructor and Deconstruct signatures stay unchanged.
+    public string? ClientStatus { get; init; }
+
     public static ApproovValidationResult Valid(
         string? deviceId,
         DateTime? tokenExpiryUtc,

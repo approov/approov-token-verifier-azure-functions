@@ -10,6 +10,7 @@ public sealed class ApproovValidationOptionsFactoryTests
         WithEnvironment(new Dictionary<string, string?>
         {
             ["APPROOV_BASE64_SECRET"] = ApproovRequestValidatorTestData.TestSecretBase64,
+            ["APPROOV_STATUS_HEADER_NAME"] = "X-Client-Status",
             ["APPROOV_PUBLIC_KEY_PEM"] = "-----BEGIN PUBLIC KEY-----\nexample\n-----END PUBLIC KEY-----",
             ["APPROOV_PUBLIC_KEY_BASE64"] = "ZXhhbXBsZQ==",
             ["APPROOV_TOKEN_SIGNING_ALGORITHMS"] = "RS256, ES256, RS256",
@@ -26,6 +27,7 @@ public sealed class ApproovValidationOptionsFactoryTests
             var options = ApproovValidationOptionsFactory.FromEnvironment();
 
             Assert.Equal(ApproovRequestValidatorTestData.TestSecretBase64, options.ApproovBase64Secret);
+            Assert.Equal("X-Client-Status", options.StatusHeaderName);
             Assert.Equal("-----BEGIN PUBLIC KEY-----\nexample\n-----END PUBLIC KEY-----", options.ApproovPublicKeyPem);
             Assert.Equal("ZXhhbXBsZQ==", options.ApproovPublicKeyBase64);
             Assert.Equal(new[] { "RS256", "ES256" }, options.TokenSigningAlgorithms);
@@ -46,6 +48,7 @@ public sealed class ApproovValidationOptionsFactoryTests
         WithEnvironment(new Dictionary<string, string?>
         {
             ["APPROOV_BASE64_SECRET"] = null,
+            ["APPROOV_STATUS_HEADER_NAME"] = " ",
             ["APPROOV_PUBLIC_KEY_PEM"] = null,
             ["APPROOV_PUBLIC_KEY_BASE64"] = null,
             ["APPROOV_TOKEN_SIGNING_ALGORITHMS"] = null,
@@ -62,6 +65,7 @@ public sealed class ApproovValidationOptionsFactoryTests
             var options = ApproovValidationOptionsFactory.FromEnvironment();
 
             Assert.Null(options.ApproovBase64Secret);
+            Assert.Equal("Approov-Status", options.StatusHeaderName);
             Assert.Null(options.ApproovPublicKeyPem);
             Assert.Null(options.ApproovPublicKeyBase64);
             Assert.Equal(new[] { "HS256" }, options.TokenSigningAlgorithms);
