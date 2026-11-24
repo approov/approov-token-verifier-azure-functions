@@ -441,10 +441,13 @@ The fragment:
 | `WEBSITE_AUTH_AAD_REQUIRE_CLIENT_SERVICE_PRINCIPAL` | Recommended | Platform default | Set to `true` when using Entra auth with APIM managed identity. |
 
 The Function reports the client token-fetch status in the JSON `clientStatus` field and in rejection logs.
-Known lowercase SDK status names pass through. A missing header produces `null` in JSON and `missing` in logs.
-Unknown, repeated, empty, and oversized values produce `invalid`. Raw status-header values never enter these fields or logs.
+The 3.7.0 service layers send the SDK token fetch status name unchanged, and these names pass through:
+`SUCCESS`, `NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, `NO_APPROOV_SERVICE`, `BAD_URL`, `UNKNOWN_URL`, `UNPROTECTED_URL`, `REJECTED`, `DISABLED`, `UNKNOWN_KEY`, `BAD_KEY`, `BAD_PAYLOAD`, `INTERNAL_ERROR`,
+plus `NO_NETWORK_PERMISSION` and `MISSING_LIB_DEPENDENCY` (Android) and `NOT_INITIALIZED` (iOS).
+Matching is case-sensitive. A missing header produces `null` in JSON and `missing` in logs.
+Unknown, lowercase, repeated, empty, and oversized values produce `invalid`. Raw status-header values never enter these fields or logs.
 This field is a client diagnostic. It never changes token verification or enforcement.
-A request with `Approov-Status: success` and no valid token still returns `401`.
+A request with `Approov-Status: SUCCESS` and no valid token still returns `401`.
 
 The verifier accepts matching `install` and `account` members in both signature dictionaries.
 It verifies the `install` member with the token's installation public key. It does not verify the account signature.

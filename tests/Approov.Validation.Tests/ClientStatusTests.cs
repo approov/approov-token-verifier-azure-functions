@@ -10,12 +10,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 public sealed class ClientStatusTests
 {
     [Theory]
-    [InlineData("no_network")]
-    [InlineData("poor_network")]
-    [InlineData("untrusted_network")]
-    [InlineData("rejected")]
-    [InlineData("success")]
-    public async Task MissingToken_ReportsClientStatusButStillRejects(string status)
+    [InlineData("NO_NETWORK")]
+    [InlineData("POOR_NETWORK")]
+    [InlineData("MITM_DETECTED")]
+    [InlineData("NO_NETWORK_PERMISSION")]
+    [InlineData("NOT_INITIALIZED")]
+    [InlineData("REJECTED")]
+    [InlineData("SUCCESS")]
+    public async Task MissingToken_ReportsSdkStatusButStillRejects(string status)
     {
         var (function, logger) = CreateFunction();
         var request = CreateRequest(status);
@@ -33,10 +35,12 @@ public sealed class ClientStatusTests
     [Theory]
     [InlineData(null, null)]
     [InlineData("", "invalid")]
-    [InlineData("SUCCESS", "invalid")]
-    [InlineData("no_network, success", "invalid")]
+    [InlineData("success", "invalid")]
+    [InlineData("no_network", "invalid")]
+    [InlineData("UNTRUSTED_NETWORK", "invalid")]
+    [InlineData("NO_NETWORK, SUCCESS", "invalid")]
     [InlineData("PRIVATE-HEADER", "invalid")]
-    [InlineData("no_network\tPRIVATE-HEADER", "invalid")]
+    [InlineData("NO_NETWORK\tPRIVATE-HEADER", "invalid")]
     public async Task UntrustedStatus_IsFilteredBeforeReporting(string? status, string? expected)
     {
         var (function, logger) = CreateFunction();
@@ -53,7 +57,7 @@ public sealed class ClientStatusTests
     [Fact]
     public async Task EmptyToken_WithReportedSuccess_IsStillRejected()
     {
-        var request = CreateRequest("success");
+        var request = CreateRequest("SUCCESS");
         request.Headers.Add("Approov-Token", "");
         var response = await CreateFunction().Function.Run(request);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -65,8 +69,8 @@ public sealed class ClientStatusTests
     [InlineData(true)]
     public async Task DuplicateOrOversizedStatus_IsNotReportedVerbatim(bool oversized)
     {
-        var request = CreateRequest(oversized ? new string('x', 10000) : "no_network");
-        if (!oversized) request.Headers.Add("Approov-Status", "success");
+        var request = CreateRequest(oversized ? new string('x', 10000) : "NO_NETWORK");
+        if (!oversized) request.Headers.Add("Approov-Status", "SUCCESS");
         var response = await CreateFunction().Function.Run(request);
         using var body = JsonDocument.Parse(((TestHttpResponseData)response).ReadBody());
         Assert.Equal("invalid", body.RootElement.GetProperty("clientStatus").GetString());
@@ -78,12 +82,29 @@ public sealed class ClientStatusTests
         var token = ApproovRequestValidatorTestData.CreateToken(ipk: ApproovRequestValidatorTestData.ValidPublicKey);
         var signed = ApproovRequestValidatorTestData.BuildSignedRequest(token);
         var headers = signed.Headers.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
-        headers["x-client-status"] = new[] { "no_network" };
-        headers["Approov-Status"] = new[] { "success" };
+        headers["x-client-status"] = new[] { "NO_NETWORK" };
+        headers["Approov-Status"] = new[] { "SUCCESS" };
         var response = await CreateFunction("X-Client-Status").Function.Run(new TestHttpRequestData(headers, signed.Body));
         using var body = JsonDocument.Parse(((TestHttpResponseData)response).ReadBody());
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("no_network", body.RootElement.GetProperty("clientStatus").GetString());
+        Assert.Equal("NO_NETWORK", body.RootElement.GetProperty("clientStatus").GetString());
+    }
+
+    [Fact]
+    public void ValidationResult_KeepsPositionalSignature()
+    {
+        var result = new ApproovValidationResult(false, 401, "missing_approov_token", "Missing token.") { ClientStatus = "NO_NETWORK" };
+        var (isValid, statusCode, reasonCode, message, deviceId, tokenExpiryUtc, tokenBindingVerified, messageSignatureVerified) = result;
+
+        Assert.False(isValid);
+        Assert.Equal(401, statusCode);
+        Assert.Equal("missing_approov_token", reasonCode);
+        Assert.Equal("Missing token.", message);
+        Assert.Null(deviceId);
+        Assert.Null(tokenExpiryUtc);
+        Assert.False(tokenBindingVerified);
+        Assert.False(messageSignatureVerified);
+        Assert.Equal("NO_NETWORK", result.ClientStatus);
     }
 
     private static TestHttpRequestData CreateRequest(string? status)
